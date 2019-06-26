@@ -22,6 +22,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sysexits.h>
 #include <string.h>
 #include <unistd.h>
 #include <zlib.h>
@@ -70,7 +71,7 @@ write_IDAT(uint8_t *buf, size_t width, int bitdepth, enum colourtype colourtype)
 	uint32_t	 crc, length;
 	size_t		 bufw;
 	uint8_t		 type[4] = "IDAT";
-	uint8_t		*data, *deflate;
+	uint8_t		*data = NULL, *deflate = NULL;
 
 	/* TODO: Directly write a compressed stream to avoid allocations */
 
@@ -83,16 +84,16 @@ write_IDAT(uint8_t *buf, size_t width, int bitdepth, enum colourtype colourtype)
 		return(0);
 	}
 
+	/* We are going to compress data, a string of NULL bytes */
 	if (NULL == (data = calloc(dataz, 1))) {
-		return(-1);
+		goto exit;
 	}
 	deflatez = compressBound(dataz);
 	if (NULL == (deflate = calloc(deflatez, 1))) {
-		free(data);
-		return(-1);
+		goto exit;
 	}
 	if (Z_OK != compress(deflate, &deflatez, data, dataz)) {
-		return(-1);
+		goto exit;
 	}
 	free(data);
 	length = htonl(deflatez);
@@ -111,6 +112,10 @@ write_IDAT(uint8_t *buf, size_t width, int bitdepth, enum colourtype colourtype)
 	bufw += sizeof(crc);
 	free(deflate);
 	return(bufw);
+exit:
+	free(data);
+	free(deflate);
+	return(-1);
 }
 
 int
@@ -130,12 +135,12 @@ main(int argc, char *argv[])
 		case 'b':
 			if (0 == (bflag = strtonum(optarg, 1, 16, NULL))) {
 				fprintf(stderr, "Invalid bit depth value\n");
-				return(EXIT_FAILURE);
+				return(EX_DATAERR);
 			}
 			if (bflag != 1 && bflag != 2 && bflag != 4
 			    && bflag != 8 && bflag != 16) {
 				fprintf(stderr, "Invalid bit depth value\n");
-				return(EXIT_FAILURE);
+				return(EX_DATAERR);
 			}
 			break;
 		case 'g':
@@ -143,23 +148,24 @@ main(int argc, char *argv[])
 			break;
 		default:
 			usage();
-			exit(EXIT_FAILURE);
+			exit(EX_USAGE);
 		}
 	argc -= optind;
 	argv += optind;
 
 	if (argc == 0 || argc > 1) {
-		fprintf(stderr, "Only one parameter is expected\n");
-		return(EXIT_FAILURE);
+		fprintf(stderr, "Width expected\n");
+		usage();
+		return(EX_USAGE);
 	}
 	if (0 == (width = strtonum(argv[0], 1, 512, NULL))) {
 		fprintf(stderr, "Width should be between 1 and 512\n");
-		return(EXIT_FAILURE);
+		return(EX_DATAERR);
 	}
 
 	if (NULL == (buf = calloc(PNGBLANK_MAX_SIZE, 1))) {
 		fprintf(stderr, "malloc(%i)\n", PNGBLANK_MAX_SIZE);
-		return(EXIT_FAILURE);
+		return(EX_OSERR);
 	}
 	bufz = 0;
 	bufz += write_png_sig(buf);
