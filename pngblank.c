@@ -67,13 +67,13 @@ write_tRNS(uint8_t *buf, enum colourtype colourtype)
 static size_t
 write_IDAT(uint8_t *buf, size_t width, int bitdepth, enum colourtype colourtype)
 {
-	size_t		 dataz, deflatez;
+	size_t		 dataz, deflatedz;
 	uint32_t	 crc, length;
-	size_t		 bufw;
+	size_t		 bufw = 0;
 	uint8_t		 type[4] = "IDAT";
-	uint8_t		*data = NULL, *deflate = NULL;
-
-	/* TODO: Directly write a compressed stream to avoid allocations */
+	uint8_t		*data = NULL, *deflated = NULL;
+	int		 level = Z_DEFAULT_COMPRESSION;
+	z_stream	 strm;
 
 	if (colourtype == COLOUR_TYPE_TRUECOLOUR) {
 		dataz = width * width * 3 * bitdepth / 8 + width;
@@ -83,38 +83,69 @@ write_IDAT(uint8_t *buf, size_t width, int bitdepth, enum colourtype colourtype)
 	} else {
 		return(0);
 	}
-
 	/* We are going to compress data, a string of NULL bytes */
-	if (NULL == (data = calloc(dataz, 1))) {
+	if (NULL == (data = calloc(dataz, sizeof(*data)))) {
 		goto exit;
 	}
-	deflatez = compressBound(dataz);
-	if (NULL == (deflate = calloc(deflatez, 1))) {
+	deflatedz = deflateBound(&strm, dataz);
+	if (NULL == (deflated = calloc(deflatedz, sizeof(*deflated)))) {
 		goto exit;
 	}
-	if (Z_OK != compress(deflate, &deflatez, data, dataz)) {
+	strm.zalloc = NULL;
+	strm.zfree = NULL;
+	strm.opaque = NULL;
+	switch (deflateInit(&strm, level)) {
+	case Z_OK:
+		break;
+	default:
+		fprintf(stderr, "deflateInit: %s\n", strm.msg);
+		goto exit;
+	}
+	fprintf(stderr, "dataz: %zu\n", dataz);
+	fprintf(stderr, "deflatedz: %zu\n", deflatedz);
+	strm.next_in = data;
+	strm.avail_in = dataz;
+	strm.next_out = deflated;
+	strm.avail_out = deflatedz;
+	/* Compress data in a single step */
+	switch (deflate(&strm, Z_FINISH)) {
+	case Z_OK:
+		fprintf(stderr, "deflate: more space was needed\n");
+		goto exit;
+	case Z_STREAM_END:
+		break;
+	default:
+		fprintf(stderr, "deflate: %s\n", strm.msg);
+		goto exit;
+	}
+	if (Z_OK != deflateEnd(&strm)) {
+		fprintf(stderr, "%s\n", strm.msg);
 		goto exit;
 	}
 	free(data);
-	length = htonl(deflatez);
+	/* Set deflatedz to the real compressed size */
+	deflatedz = strm.total_out;
+	fprintf(stderr, "dataz: %lld\n", strm.total_in);
+	fprintf(stderr, "deflatedz: %lld\n", strm.total_out);
+	fprintf(stderr, "Compression finished\n");
+	length = htonl(deflatedz);
 	crc = crc32(0, Z_NULL, 0);
 	crc = crc32(crc, type, sizeof(type));
-	crc = crc32(crc, deflate, deflatez);
+	crc = crc32(crc, deflated, deflatedz);
 	crc = htonl(crc);
-	bufw = 0;
 	(void)memcpy(buf + bufw, &length, sizeof(length));
 	bufw += sizeof(length);
 	(void)memcpy(buf + bufw, type, sizeof(type));
 	bufw += sizeof(type);
-	(void)memcpy(buf + bufw, deflate, deflatez);
-	bufw += deflatez;
+	(void)memcpy(buf + bufw, deflated, deflatedz);
+	bufw += deflatedz;
 	(void)memcpy(buf + bufw, &crc, sizeof(crc));
 	bufw += sizeof(crc);
-	free(deflate);
+	free(deflated);
 	return(bufw);
 exit:
 	free(data);
-	free(deflate);
+	free(deflated);
 	return(-1);
 }
 
