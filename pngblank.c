@@ -161,11 +161,13 @@ main(int argc, char *argv[])
 	int		 bflag;
 	int		 gflag;
 	int		 lflag;
+	int		 nflag;
 	int		 sflag;
 
 	bflag = 8;
 	gflag = COLOUR_TYPE_TRUECOLOUR;
 	lflag = Z_DEFAULT_COMPRESSION;
+	nflag = 0;
 	sflag = Z_DEFAULT_STRATEGY;
 	while (-1 != (ch = getopt(argc, argv, "b:gl:ns:")))
 		switch (ch) {
@@ -189,6 +191,9 @@ main(int argc, char *argv[])
 				fprintf(stderr, "value is %s -- l\n", errstr);
 				return(EX_DATAERR);
 			}
+			break;
+		case 'n':
+			nflag = 1;
 			break;
 		case 's':
 			if (strcmp(optarg, "default") == 0) {
@@ -234,7 +239,11 @@ main(int argc, char *argv[])
 	off += write_tRNS(buf + off, gflag);
 	off += write_IDAT(buf, off, width, bflag, gflag, lflag, sflag);
 	off += write_IEND(buf + off);
-	fwrite(buf, sizeof(uint8_t), off, f);
+	if (0 == nflag) {
+		fwrite(buf, sizeof(uint8_t), off, f);
+	} else {
+		printf("%zu\n", off);
+	}
 	fclose(f);
 	return(0);
 }
@@ -242,7 +251,7 @@ main(int argc, char *argv[])
 void
 usage(void)
 {
-	fprintf(stderr, "usage: %s [-g] [-b bitdepth] [-l level]"
+	fprintf(stderr, "usage: %s [-gn] [-b bitdepth] [-l level]"
 			" [-s strategy] width\n", getprogname());
 }
 
