@@ -29,7 +29,7 @@
 
 #include "lgpng.h"
 
-#define PNGBLANK_MAX_SIZE 1024
+#define PNGBLANK_MAX_SIZE 8192
 
 static size_t
 write_tRNS(uint8_t *buf, enum colourtype colourtype)
@@ -65,14 +65,13 @@ write_tRNS(uint8_t *buf, enum colourtype colourtype)
 }
 
 static size_t
-write_IDAT(uint8_t *buf, size_t width, int bitdepth, enum colourtype colourtype)
+write_IDAT(uint8_t *buf, size_t off, size_t width, int bitdepth, enum colourtype colourtype, int level, int strategy)
 {
 	size_t		 dataz, deflatedz;
 	uint32_t	 crc, length;
 	size_t		 bufw = 0;
 	uint8_t		 type[4] = "IDAT";
 	uint8_t		*data = NULL, *deflated = NULL;
-	int		 level = Z_DEFAULT_COMPRESSION;
 	z_stream	 strm;
 
 	if (colourtype == COLOUR_TYPE_TRUECOLOUR) {
@@ -101,12 +100,14 @@ write_IDAT(uint8_t *buf, size_t width, int bitdepth, enum colourtype colourtype)
 		fprintf(stderr, "deflateInit: %s\n", strm.msg);
 		goto exit;
 	}
-	fprintf(stderr, "dataz: %zu\n", dataz);
-	fprintf(stderr, "deflatedz: %zu\n", deflatedz);
 	strm.next_in = data;
 	strm.avail_in = dataz;
 	strm.next_out = deflated;
 	strm.avail_out = deflatedz;
+	if (Z_OK != deflateParams(&strm, level, strategy)) {
+		fprintf(stderr, "deflateParams stream error: %s\n", strm.msg);
+		goto exit;
+	}
 	/* Compress data in a single step */
 	switch (deflate(&strm, Z_FINISH)) {
 	case Z_OK:
@@ -123,23 +124,23 @@ write_IDAT(uint8_t *buf, size_t width, int bitdepth, enum colourtype colourtype)
 		goto exit;
 	}
 	free(data);
+	data = NULL;
 	/* Set deflatedz to the real compressed size */
 	deflatedz = strm.total_out;
-	fprintf(stderr, "dataz: %lld\n", strm.total_in);
-	fprintf(stderr, "deflatedz: %lld\n", strm.total_out);
-	fprintf(stderr, "Compression finished\n");
 	length = htonl(deflatedz);
 	crc = crc32(0, Z_NULL, 0);
 	crc = crc32(crc, type, sizeof(type));
 	crc = crc32(crc, deflated, deflatedz);
 	crc = htonl(crc);
-	(void)memcpy(buf + bufw, &length, sizeof(length));
+	(void)memcpy(buf + off + bufw, &length, sizeof(length));
 	bufw += sizeof(length);
-	(void)memcpy(buf + bufw, type, sizeof(type));
+	(void)memcpy(buf + off + bufw, type, sizeof(type));
 	bufw += sizeof(type);
-	(void)memcpy(buf + bufw, deflated, deflatedz);
+
+	(void)memcpy(buf + off + bufw, deflated, deflatedz);
 	bufw += deflatedz;
-	(void)memcpy(buf + bufw, &crc, sizeof(crc));
+
+	(void)memcpy(buf + off + bufw, &crc, sizeof(crc));
 	bufw += sizeof(crc);
 	free(deflated);
 	return(bufw);
@@ -152,30 +153,59 @@ exit:
 int
 main(int argc, char *argv[])
 {
-	FILE	*f = stdout;
-	uint8_t	*buf;
-	size_t	 width, bufz;
-	int	 ch;
-	int	 bflag;
-	int	 gflag;
+	FILE		*f = stdout;
+	uint8_t		*buf;
+	const char	*errstr = NULL;
+	size_t		 width, off, written, minimum_size;
+	int		 ch;
+	int		 bflag;
+	int		 gflag;
+	int		 lflag;
+	int		 sflag;
 
 	bflag = 8;
 	gflag = COLOUR_TYPE_TRUECOLOUR;
-	while (-1 != (ch = getopt(argc, argv, "b:g")))
+	lflag = Z_DEFAULT_COMPRESSION;
+	sflag = Z_DEFAULT_STRATEGY;
+	while (-1 != (ch = getopt(argc, argv, "b:gl:ns:")))
 		switch (ch) {
 		case 'b':
-			if (0 == (bflag = strtonum(optarg, 1, 16, NULL))) {
-				fprintf(stderr, "Invalid bit depth value\n");
+			if (0 == (bflag = strtonum(optarg, 1, 16, &errstr))) {
+				fprintf(stderr, "value is %s -- b\n", errstr);
 				return(EX_DATAERR);
 			}
 			if (bflag != 1 && bflag != 2 && bflag != 4
 			    && bflag != 8 && bflag != 16) {
-				fprintf(stderr, "Invalid bit depth value\n");
+				fprintf(stderr, "value is invalid -- b\n");
 				return(EX_DATAERR);
 			}
 			break;
 		case 'g':
 			gflag = COLOUR_TYPE_GREYSCALE;
+			break;
+		case 'l':
+			lflag = strtonum(optarg, 1, 9, &errstr);
+			if (NULL != errstr) {
+				fprintf(stderr, "value is %s -- l\n", errstr);
+				return(EX_DATAERR);
+			}
+			break;
+		case 's':
+			if (strcmp(optarg, "default") == 0) {
+				sflag = Z_DEFAULT_STRATEGY;
+			} else if (strcmp(optarg, "filtered") == 0) {
+				sflag = Z_FILTERED;
+			} else if (strcmp(optarg, "huffmanonly") == 0) {
+				sflag = Z_HUFFMAN_ONLY;
+			} else if (strcmp(optarg, "fixed") == 0) {
+				sflag = Z_FIXED;
+			} else if (strcmp(optarg, "rle") == 0) {
+				sflag = Z_RLE;
+			} else {
+				fprintf(stderr, "unknown compression"
+				    " strategy -- s\n");
+				return(EX_DATAERR);
+			}
 			break;
 		default:
 			usage();
@@ -198,13 +228,13 @@ main(int argc, char *argv[])
 		fprintf(stderr, "malloc(%i)\n", PNGBLANK_MAX_SIZE);
 		return(EX_OSERR);
 	}
-	bufz = 0;
-	bufz += write_png_sig(buf);
-	bufz += write_IHDR(buf + bufz, width, bflag, gflag);
-	bufz += write_tRNS(buf + bufz, gflag);
-	bufz += write_IDAT(buf + bufz, width, bflag, gflag);
-	bufz += write_IEND(buf + bufz);
-	fwrite(buf, sizeof(uint8_t), bufz, f);
+	off = 0;
+	off += write_png_sig(buf);
+	off += write_IHDR(buf + off, width, bflag, gflag);
+	off += write_tRNS(buf + off, gflag);
+	off += write_IDAT(buf, off, width, bflag, gflag, lflag, sflag);
+	off += write_IEND(buf + off);
+	fwrite(buf, sizeof(uint8_t), off, f);
 	fclose(f);
 	return(0);
 }
@@ -212,6 +242,7 @@ main(int argc, char *argv[])
 void
 usage(void)
 {
-	fprintf(stderr, "usage: %s [-g] [-b bitdepth] width\n", getprogname());
+	fprintf(stderr, "usage: %s [-g] [-b bitdepth] [-l level]"
+			" [-s strategy] width\n", getprogname());
 }
 
