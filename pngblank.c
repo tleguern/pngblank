@@ -31,6 +31,8 @@
 
 #define PNGBLANK_MAX_SIZE 8192
 
+static void usage(void);
+
 static int
 prepare_IDAT(struct IDAT *idat, struct IHDR *ihdr, int level, int strategy)
 {
