@@ -99,6 +99,15 @@ init_IHDR(struct IHDR *ihdr)
 }
 
 void
+init_PLTE(struct PLTE *plte)
+{
+	plte->length = 0;
+	plte->type = CHUNK_TYPE_PLTE;
+	(void)memset(plte->data.entry, '\0', sizeof(plte->data.entry));
+	plte->crc = 0;
+}
+
+void
 init_IDAT(struct IDAT *idat)
 {
 	idat->length = 0;

@@ -48,6 +48,8 @@ prepare_IDAT(struct IDAT *idat, struct IHDR *ihdr, int level, int strategy)
 	} else if (COLOUR_TYPE_GREYSCALE == ihdr->data.colourtype) {
 		dataz = (width / (8 / ihdr->data.bitdepth) + \
 		    (width % (8 / ihdr->data.bitdepth) != 0 ? 1 : 0) + 1) * width;
+	} else if (COLOUR_TYPE_INDEXED == ihdr->data.colourtype) {
+		dataz = width * width * ihdr->data.bitdepth / 8 + width;
 	} else {
 		fprintf(stderr, "Invalid colourtype\n");
 		return(-1);
@@ -115,22 +117,26 @@ main(int argc, char *argv[])
 	uint8_t		*buf;
 	const char	*errstr = NULL;
 	size_t		 width, off;
-	int		 ch;
+	int		 ch, colourtype;
 	int		 bflag;
 	int		 gflag;
 	int		 lflag;
 	int		 nflag;
+	int		 pflag;
 	int		 sflag;
 	struct IHDR	 ihdr;
-	struct tRNS	 trns;
+	struct PLTE	 plte;
 	struct IDAT	 idat;
+	struct tRNS	 trns;
 
 	bflag = 8;
-	gflag = COLOUR_TYPE_TRUECOLOUR;
+	gflag = 0;
 	lflag = Z_DEFAULT_COMPRESSION;
 	nflag = 0;
+	pflag = 0;
 	sflag = Z_DEFAULT_STRATEGY;
-	while (-1 != (ch = getopt(argc, argv, "b:gl:ns:")))
+	colourtype = COLOUR_TYPE_TRUECOLOUR;
+	while (-1 != (ch = getopt(argc, argv, "b:gl:nps:")))
 		switch (ch) {
 		case 'b':
 			if (0 == (bflag = strtonum(optarg, 1, 16, &errstr))) {
@@ -144,7 +150,7 @@ main(int argc, char *argv[])
 			}
 			break;
 		case 'g':
-			gflag = COLOUR_TYPE_GREYSCALE;
+			gflag = 1;
 			break;
 		case 'l':
 			lflag = strtonum(optarg, 1, 9, &errstr);
@@ -155,6 +161,9 @@ main(int argc, char *argv[])
 			break;
 		case 'n':
 			nflag = 1;
+			break;
+		case 'p':
+			pflag = 1;
 			break;
 		case 's':
 			if (strcmp(optarg, "default") == 0) {
@@ -189,7 +198,15 @@ main(int argc, char *argv[])
 		fprintf(stderr, "Width should be between 1 and 512\n");
 		return(EX_DATAERR);
 	}
-
+	if (1 == gflag && 1 == pflag) {
+		fprintf(stderr, "Options -g and -p are mutualy exclusive\n");
+		usage();
+		return(EX_USAGE);
+	} else if (1 == gflag) {
+		colourtype = COLOUR_TYPE_GREYSCALE;
+	} else if (1 == pflag) {
+		colourtype = COLOUR_TYPE_INDEXED;
+	}
 	if (NULL == (buf = calloc(PNGBLANK_MAX_SIZE, 1))) {
 		fprintf(stderr, "malloc(%i)\n", PNGBLANK_MAX_SIZE);
 		return(EX_OSERR);
@@ -200,11 +217,21 @@ main(int argc, char *argv[])
 	ihdr.data.width = htonl(width);
 	ihdr.data.height = htonl(width);
 	ihdr.data.bitdepth = bflag;
-	ihdr.data.colourtype = gflag;
+	ihdr.data.colourtype = colourtype;
 	update_crc((struct chunk *)&ihdr);
 
+	/* PLTE preparation */
+	if (1 == pflag) {
+		init_PLTE(&plte);
+		plte.length = 3; /* Three bytes in a PLTE entry, it's RGB */
+		update_crc((struct chunk *)&plte);
+	}
+
 	/* tRNS preparation */
-	init_tRNS(&trns, gflag);
+	init_tRNS(&trns, colourtype);
+	if (1 == pflag) {
+		trns.length = 1;
+	}
 	update_crc((struct chunk *)&trns);
 
 	/* IDAT preparation */
@@ -217,6 +244,9 @@ main(int argc, char *argv[])
 	off = 0;
 	off += write_png_sig(buf);
 	off += write_chunk(buf + off, (struct chunk *)&ihdr);
+	if (1 == pflag) {
+		off += write_chunk(buf + off, (struct chunk *)&plte);
+	}
 	off += write_chunk(buf + off, (struct chunk *)&trns);
 	off += write_chunk(buf + off, (struct chunk *)&idat);
 	off += write_IEND(buf + off);
@@ -233,7 +263,7 @@ main(int argc, char *argv[])
 void
 usage(void)
 {
-	fprintf(stderr, "usage: %s [-gn] [-b bitdepth] [-l level]"
+	fprintf(stderr, "usage: %s [-gnp] [-b bitdepth] [-l level]"
 			" [-s strategy] width\n", getprogname());
 }
 

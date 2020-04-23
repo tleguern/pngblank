@@ -105,6 +105,22 @@ struct IHDR {
 	} __attribute__((packed)) data;
 };
 
+/* PLTE chunk */
+struct rgb8 {
+	uint8_t	red;
+	uint8_t	green;
+	uint8_t	blue;
+} __attribute__((packed));
+
+struct PLTE {
+	uint32_t	 length;
+	enum chunktype	 type;
+	uint32_t	 crc;
+	struct {
+		struct rgb8	entry[256];
+	} data;
+};
+
 /* IDAT chunk */
 enum filtertype {
 	FILTER_TYPE_NONE,
@@ -145,6 +161,7 @@ size_t		write_chunk(uint8_t *, struct chunk *);
 
 /* Specialized interfaces */
 void		init_IHDR(struct IHDR *);
+void		init_PLTE(struct PLTE *);
 void		init_IDAT(struct IDAT *);
 void		init_tRNS(struct tRNS *, enum colourtype);
 size_t		write_IEND(uint8_t *);
