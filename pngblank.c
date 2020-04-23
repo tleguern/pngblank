@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Tristan Le Guern <tleguern@bouledef.eu>
+ * Copyright (c) 2018,2020 Tristan Le Guern <tleguern@bouledef.eu>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -31,65 +31,30 @@
 
 #define PNGBLANK_MAX_SIZE 8192
 
-static size_t
-write_tRNS(uint8_t *buf, enum colourtype colourtype)
-{
-	uint32_t	crc, length;
-	size_t		bufw, trnsz;
-	uint8_t		type[4] = "tRNS";
-	uint8_t		trns[6];
-
-	(void)memset(trns, 0, sizeof(trns));
-	if (colourtype == COLOUR_TYPE_TRUECOLOUR) {
-		trnsz = 6;
-	} else if (colourtype == COLOUR_TYPE_GREYSCALE) {
-		trnsz = 2;
-	} else {
-		return(0);
-	}
-	length = htonl(trnsz);
-	crc = crc32(0, Z_NULL, 0);
-	crc = crc32(crc, type, sizeof(type));
-	crc = crc32(crc, (Bytef *)trns, trnsz);
-	crc = htonl(crc);
-	bufw = 0;
-	(void)memcpy(buf + bufw, &length, sizeof(length));
-	bufw += sizeof(length);
-	(void)memcpy(buf + bufw, type, sizeof(type));
-	bufw += sizeof(type);
-	(void)memcpy(buf + bufw, &trns, trnsz);
-	bufw += trnsz;
-	(void)memcpy(buf + bufw, &crc, sizeof(crc));
-	bufw += sizeof(crc);
-	return(bufw);
-}
-
-static size_t
-write_IDAT(uint8_t *buf, size_t off, size_t width, int bitdepth, enum colourtype colourtype, int level, int strategy)
+static int
+prepare_IDAT(struct IDAT *idat, struct IHDR *ihdr, int level, int strategy)
 {
 	size_t		 dataz, deflatedz;
-	uint32_t	 crc, length;
-	size_t		 bufw = 0;
-	uint8_t		 type[4] = "IDAT";
 	uint8_t		*data = NULL, *deflated = NULL;
 	z_stream	 strm;
+	uint32_t	 width;
 
-	if (colourtype == COLOUR_TYPE_TRUECOLOUR) {
-		dataz = width * width * 3 * bitdepth / 8 + width;
-	} else if (colourtype == COLOUR_TYPE_GREYSCALE) {
-		dataz = (width / (8 / bitdepth) + \
-		    (width % (8 / bitdepth) != 0 ? 1 : 0) + 1) * width;
+	width = ntohl(ihdr->data.width);
+	/* Calculate the buffer size using bitdepth and colour type */
+	if (COLOUR_TYPE_TRUECOLOUR == ihdr->data.colourtype) {
+		dataz = width * width * 3 * ihdr->data.bitdepth / 8 + width;
+	} else if (COLOUR_TYPE_GREYSCALE == ihdr->data.colourtype) {
+		dataz = (width / (8 / ihdr->data.bitdepth) + \
+		    (width % (8 / ihdr->data.bitdepth) != 0 ? 1 : 0) + 1) * width;
 	} else {
-		return(0);
+		fprintf(stderr, "Invalid colourtype\n");
+		return(-1);
 	}
-	/* We are going to compress data, a string of NULL bytes */
+	/* The data is a stream of zero so calloc is perfect */
 	if (NULL == (data = calloc(dataz, sizeof(*data)))) {
 		goto exit;
 	}
-	deflatedz = deflateBound(&strm, dataz);
-	if (NULL == (deflated = calloc(deflatedz, sizeof(*deflated)))) {
-		goto exit;
-	}
+	/* Prepare for a single-step compression */
 	strm.zalloc = NULL;
 	strm.zfree = NULL;
 	strm.opaque = NULL;
@@ -100,6 +65,11 @@ write_IDAT(uint8_t *buf, size_t off, size_t width, int bitdepth, enum colourtype
 		fprintf(stderr, "deflateInit: %s\n", strm.msg);
 		goto exit;
 	}
+	deflatedz = deflateBound(&strm, dataz);
+	if (NULL == (deflated = calloc(deflatedz, sizeof(*deflated)))) {
+		fprintf(stderr, "calloc()\n");
+		goto exit;
+	}
 	strm.next_in = data;
 	strm.avail_in = dataz;
 	strm.next_out = deflated;
@@ -108,7 +78,7 @@ write_IDAT(uint8_t *buf, size_t off, size_t width, int bitdepth, enum colourtype
 		fprintf(stderr, "deflateParams stream error: %s\n", strm.msg);
 		goto exit;
 	}
-	/* Compress data in a single step */
+	/* Finaly compress data */
 	switch (deflate(&strm, Z_FINISH)) {
 	case Z_OK:
 		fprintf(stderr, "deflate: more space was needed\n");
@@ -127,23 +97,9 @@ write_IDAT(uint8_t *buf, size_t off, size_t width, int bitdepth, enum colourtype
 	data = NULL;
 	/* Set deflatedz to the real compressed size */
 	deflatedz = strm.total_out;
-	length = htonl(deflatedz);
-	crc = crc32(0, Z_NULL, 0);
-	crc = crc32(crc, type, sizeof(type));
-	crc = crc32(crc, deflated, deflatedz);
-	crc = htonl(crc);
-	(void)memcpy(buf + off + bufw, &length, sizeof(length));
-	bufw += sizeof(length);
-	(void)memcpy(buf + off + bufw, type, sizeof(type));
-	bufw += sizeof(type);
-
-	(void)memcpy(buf + off + bufw, deflated, deflatedz);
-	bufw += deflatedz;
-
-	(void)memcpy(buf + off + bufw, &crc, sizeof(crc));
-	bufw += sizeof(crc);
-	free(deflated);
-	return(bufw);
+	idat->length = deflatedz;
+	idat->data = deflated;
+	return(0);
 exit:
 	free(data);
 	free(deflated);
@@ -156,13 +112,16 @@ main(int argc, char *argv[])
 	FILE		*f = stdout;
 	uint8_t		*buf;
 	const char	*errstr = NULL;
-	size_t		 width, off, written, minimum_size;
+	size_t		 width, off;
 	int		 ch;
 	int		 bflag;
 	int		 gflag;
 	int		 lflag;
 	int		 nflag;
 	int		 sflag;
+	struct IHDR	 ihdr;
+	struct tRNS	 trns;
+	struct IDAT	 idat;
 
 	bflag = 8;
 	gflag = COLOUR_TYPE_TRUECOLOUR;
@@ -188,7 +147,7 @@ main(int argc, char *argv[])
 		case 'l':
 			lflag = strtonum(optarg, 1, 9, &errstr);
 			if (NULL != errstr) {
-				fprintf(stderr, "value is %s -- l\n", errstr);
+				fprintf(stderr, "value is %s, should be between 1 and 9 -- l\n", errstr);
 				return(EX_DATAERR);
 			}
 			break;
@@ -233,12 +192,33 @@ main(int argc, char *argv[])
 		fprintf(stderr, "malloc(%i)\n", PNGBLANK_MAX_SIZE);
 		return(EX_OSERR);
 	}
+
+	/* IHDR preparation */
+	init_IHDR(&ihdr);
+	ihdr.data.width = htonl(width);
+	ihdr.data.height = htonl(width);
+	ihdr.data.bitdepth = bflag;
+	ihdr.data.colourtype = gflag;
+	update_crc((struct chunk *)&ihdr);
+
+	/* tRNS preparation */
+	init_tRNS(&trns, gflag);
+	update_crc((struct chunk *)&trns);
+
+	/* IDAT preparation */
+	init_IDAT(&idat);
+	if (-1 == prepare_IDAT(&idat, &ihdr, lflag, sflag)) {
+		return(1);
+	}
+	update_crc((struct chunk *)&idat);
+
 	off = 0;
 	off += write_png_sig(buf);
-	off += write_IHDR(buf + off, width, bflag, gflag);
-	off += write_tRNS(buf + off, gflag);
-	off += write_IDAT(buf, off, width, bflag, gflag, lflag, sflag);
+	off += write_chunk(buf + off, (struct chunk *)&ihdr);
+	off += write_chunk(buf + off, (struct chunk *)&trns);
+	off += write_chunk(buf + off, (struct chunk *)&idat);
 	off += write_IEND(buf + off);
+	free(idat.data);
 	if (0 == nflag) {
 		fwrite(buf, sizeof(uint8_t), off, f);
 	} else {
