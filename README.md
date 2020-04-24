@@ -1,69 +1,45 @@
-PNGBLANK(1) - General Commands Manual
+# pngblank
 
-# NAME
+The pngblank utility generates fully transparent PNG images.
 
-**pngblank** - generate images
+## Contents
 
-# SYNOPSIS
+1. [Install](#install)
+2. [Instructions](#instruction)
+3. [License](#license)
 
-**pngblank**
-\[**-gnp**]
-\[**-b**&nbsp;*bitdepth*]
-\[**-l**&nbsp;*level*]
-\[**-s**&nbsp;*strategy*]
-*width*
+## Install
 
-# DESCRIPTION
+#### Requires
 
-The
-**pngblank**
-utility generates fully transparent, square PNG images in various way.
-By default the images are generated using true colours and a bit depth of 8.
+* C compiler ;
+* libz.
 
-The options are as follows:
+### Build
 
-**-g**
+    $ ./configure
+    $ make
+    # make install
 
-> Set the colour type to grayscale.
+## Instructions
 
-**-n**
+To see a description of its options see the [man][./pngblank.md] page.
 
-> Do not generate an image, print its size in bytes instead.
+`pngblank` can generates images using various colour modes, bit depths and compression level.
 
-**-p**
+For a 2,5 kilobytes monstrosity one can type:
 
-> Set the colour type to indexed.
+    $ pngblank -l 1 -s huffmanonly 80 > big.png
+    $ ls -ngh big.png
+    -rw-r--r--  1 0   2.5K Apr 24 12:43 big.png
 
-**-b** *bitdepth*
+But if you prefer your files small and lean `pngblank` got you covered too:
 
-> Set the bitdepth to a specific value.
+    $ pngblank -g -b 1 80 > small.png
+    $ ls -ngh small.png
+    -rw-r--r--  1 0    88B Apr 24 12:43 small.png
 
-**-l** *level*
+## License
 
-> Set the compression level.
-
-**-s** *strategy*
-
-> Set the compression strategy.
-
-# EXIT STATUS
-
-The **pngblank** utility exits&#160;0 on success, and&#160;&gt;0 if an error occurs.
-
-# SEE ALSO
-
-pnginfo(1)
-
-# STANDARDS
-
-*Portable Network Graphics (PNG) Specification (Second Edition)*,
-10 November 2003.
-
-# AUTHORS
-
-The
-**pngblank**
-utility was written by
-Tristan Le Guern &lt;[tleguern@bouledef.eu](mailto:tleguern@bouledef.eu)&gt;.
-
-OpenBSD 6.7 - April 23, 2020
+All the code is licensed under the ISC License.
+It's free, not GPLed !

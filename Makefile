@@ -12,7 +12,10 @@ CFLAGS= -Wall -Wextra
 .SUFFIXES: .c .o .1 .md
 .PHONY: clean install
 
-all: ${PROG} README.md
+all: ${PROG} pngblank.md
+
+.1.md:
+	mandoc -T markdown $< > $@
 
 .c.o:
 	${CC} ${CFLAGS} -c $<
@@ -20,8 +23,7 @@ all: ${PROG} README.md
 ${PROG}: ${OBJS}
 	${CC} ${LDFLAGS} -o $@ ${OBJS} ${LDADD}
 
-README.md: pngblank.1
-	mandoc -T markdown pngblank.1 > README.md
+pngblank.md: pngblank.1
 
 clean:
 	rm -f -- ${OBJS} ${PROG}
