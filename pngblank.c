@@ -129,6 +129,10 @@ main(int argc, char *argv[])
 	struct IDAT	 idat;
 	struct tRNS	 trns;
 
+#if HAVE_PLEDGE
+        pledge("stdio", NULL);
+#endif
+
 	bflag = 8;
 	gflag = 0;
 	lflag = Z_DEFAULT_COMPRESSION;
@@ -256,7 +260,6 @@ main(int argc, char *argv[])
 	} else {
 		printf("%zu\n", off);
 	}
-	fclose(f);
 	return(0);
 }
 
