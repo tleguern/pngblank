@@ -17,9 +17,17 @@ The pngblank utility generates fully transparent PNG images.
 
 ### Build
 
+To install globally:
+
     $ ./configure
     $ make
     # make install
+
+To install in your `$HOME/bin`:
+
+    $ ./configure PREFIX=~
+    $ make
+    $ make install
 
 ## Instructions
 
