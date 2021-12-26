@@ -29,7 +29,7 @@ clean:
 	rm -f -- ${OBJS} ${PROG}
 
 install:
-	mkdir -p ${PREFIX}/bin/
-	mkdir -p ${DESTDIR}${MANDIR}/man1
-	${INSTALL_PROGRAM} ${PROG} ${PREFIX}/bin/${PROG}
-	${INSTALL_MAN} ${PROG}.1 ${DESTDIR}${MANDIR}/man1
+	mkdir -p ${BINDIR}
+	mkdir -p ${MANDIR}/man1
+	${INSTALL_PROGRAM} ${PROG} ${BINDIR}
+	${INSTALL_MAN} ${PROG}.1 ${MANDIR}/man1
