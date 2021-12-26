@@ -80,7 +80,7 @@ write_png_sig(uint8_t *buf)
 }
 
 /*
- * Three specialized initialization functions, perhaps to be replaced later
+ * Specialized initialization functions, perhaps to be replaced later
  * by a unified interface.
  */
 void
