@@ -10,7 +10,7 @@ The pngblank utility generates fully transparent PNG images.
 
 ## Install
 
-#### Requires
+### Requires
 
 * C compiler ;
 * libz.
@@ -23,7 +23,7 @@ The pngblank utility generates fully transparent PNG images.
 
 ## Instructions
 
-To see a description of its options see the [man][./pngblank.md] page.
+To see a description of its options see the [man](./pngblank.md) page.
 
 `pngblank` can generates images using various colour modes, bit depths and compression level.
 
