@@ -131,8 +131,6 @@ enum filtertype {
 	FILTER_TYPE__MAX,
 };
 
-extern const char *filtertypemap[FILTER_TYPE__MAX];
-
 struct IDAT {
 	uint32_t	 length;
 	enum chunktype	 type;
