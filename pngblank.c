@@ -26,38 +26,26 @@
 #include <string.h>
 #include <unistd.h>
 #include <zlib.h>
+#include <libdeflate.h>
 
 #include "lgpng.h"
 
 #define PNGBLANK_MAX_SIZE 8192
 
+enum {
+	PNG_BLANK_ZLIB,
+	PNG_BLANK_LIBDEFLATE
+};
+
 static void usage(void);
 
 static int
-create_IDAT_with_zlib(struct IDAT *idat, struct IHDR *ihdr, int level, int strategy)
+create_IDAT_with_zlib(struct IDAT *idat, int level, int strategy)
 {
-	size_t		 dataz, deflatedz;
-	uint8_t		*data = NULL, *deflated = NULL;
+	size_t		 deflatedz;
+	uint8_t		*deflated = NULL;
 	z_stream	 strm;
-	uint32_t	 width;
 
-	width = ntohl(ihdr->data.width);
-	/* Calculate the buffer size using bitdepth and colour type */
-	if (COLOUR_TYPE_TRUECOLOUR == ihdr->data.colourtype) {
-		dataz = width * width * 3 * ihdr->data.bitdepth / 8 + width;
-	} else if (COLOUR_TYPE_GREYSCALE == ihdr->data.colourtype) {
-		dataz = (width / (8 / ihdr->data.bitdepth) + \
-		    (width % (8 / ihdr->data.bitdepth) != 0 ? 1 : 0) + 1) * width;
-	} else if (COLOUR_TYPE_INDEXED == ihdr->data.colourtype) {
-		dataz = width * width * ihdr->data.bitdepth / 8 + width;
-	} else {
-		fprintf(stderr, "Invalid colourtype\n");
-		return(-1);
-	}
-	/* The data is a stream of zero so calloc is perfect */
-	if (NULL == (data = calloc(dataz, sizeof(*data)))) {
-		goto exit;
-	}
 	/* Prepare for a single-step compression */
 	strm.zalloc = NULL;
 	strm.zfree = NULL;
@@ -69,13 +57,13 @@ create_IDAT_with_zlib(struct IDAT *idat, struct IHDR *ihdr, int level, int strat
 		fprintf(stderr, "deflateInit: %s\n", strm.msg);
 		goto exit;
 	}
-	deflatedz = deflateBound(&strm, dataz);
+	deflatedz = deflateBound(&strm, idat->length);
 	if (NULL == (deflated = calloc(deflatedz, sizeof(*deflated)))) {
 		fprintf(stderr, "calloc()\n");
 		goto exit;
 	}
-	strm.next_in = data;
-	strm.avail_in = dataz;
+	strm.next_in = idat->data.data;
+	strm.avail_in = idat->length;
 	strm.next_out = deflated;
 	strm.avail_out = deflatedz;
 	if (Z_OK != deflateParams(&strm, level, strategy)) {
@@ -97,16 +85,43 @@ create_IDAT_with_zlib(struct IDAT *idat, struct IHDR *ihdr, int level, int strat
 		fprintf(stderr, "%s\n", strm.msg);
 		goto exit;
 	}
-	free(data);
-	data = NULL;
+	free(idat->data.data);
 	/* Set deflatedz to the real compressed size */
 	deflatedz = strm.total_out;
 	idat->length = deflatedz;
 	idat->data.data = deflated;
 	return(0);
 exit:
-	free(data);
 	free(deflated);
+	return(-1);
+}
+
+static int
+create_IDAT_with_libdeflate(struct IDAT *idat, int level)
+{
+	size_t				 deflatedz;
+	uint8_t				*deflated = NULL;
+	struct libdeflate_compressor	*compressor = NULL;
+
+	compressor = libdeflate_alloc_compressor(level);
+	deflatedz = libdeflate_zlib_compress_bound(compressor, idat->length);
+	if (NULL == (deflated = calloc(deflatedz, 1))) {
+		fprintf(stderr, "calloc()\n");
+		goto exit;
+	}
+	if (0 == (deflatedz = libdeflate_zlib_compress(compressor, idat->data.data, idat->length, deflated, deflatedz))) {
+		fprintf(stderr, "Can't compress data with libdeflate\n");
+		goto exit;
+	}
+	free(idat->data.data);
+	deflated = realloc(deflated, deflatedz);
+	idat->length = deflatedz;
+	idat->data.data = deflated;
+	libdeflate_free_compressor(compressor);
+	return(0);
+exit:
+	free(deflated);
+	libdeflate_free_compressor(compressor);
 	return(-1);
 }
 
@@ -116,9 +131,11 @@ main(int argc, char *argv[])
 	FILE		*f = stdout;
 	uint8_t		*buf;
 	const char	*errstr = NULL;
+	char		*rawlflag = NULL;
 	size_t		 width, off;
 	int		 ch, colourtype;
 	int		 bflag;
+	int		 cflag;
 	int		 gflag;
 	int		 lflag;
 	int		 nflag;
@@ -129,19 +146,24 @@ main(int argc, char *argv[])
 	struct IDAT	 idat;
 	struct tRNS	 trns;
 	uint32_t	 iend_crc;
+	int		 max;
+	int		 zlib_max = 9;
+	int		 libdeflate_max = 12;
 
 #if HAVE_PLEDGE
         pledge("stdio", NULL);
 #endif
 
 	bflag = 8;
+	cflag = PNG_BLANK_ZLIB;
 	gflag = 0;
 	lflag = Z_DEFAULT_COMPRESSION;
 	nflag = 0;
 	pflag = 0;
 	sflag = Z_DEFAULT_STRATEGY;
 	colourtype = COLOUR_TYPE_TRUECOLOUR;
-	while (-1 != (ch = getopt(argc, argv, "b:gl:nps:")))
+	max = zlib_max;
+	while (-1 != (ch = getopt(argc, argv, "b:c:gl:nps:")))
 		switch (ch) {
 		case 'b':
 			if (0 == (bflag = strtonum(optarg, 1, 16, &errstr))) {
@@ -154,15 +176,23 @@ main(int argc, char *argv[])
 				return(EX_DATAERR);
 			}
 			break;
+		case 'c':
+			if (0 == strcmp("zlib", optarg)) {
+				cflag = PNG_BLANK_ZLIB;
+			} else if (0 == strcmp("libdeflate", optarg)) {
+				cflag = PNG_BLANK_LIBDEFLATE;
+				lflag = 6;
+				max = libdeflate_max;
+			} else {
+				fprintf(stderr, "invalid compression library -- %s",
+				    optarg);
+			}
+			break;
 		case 'g':
 			gflag = 1;
 			break;
 		case 'l':
-			lflag = strtonum(optarg, 1, 9, &errstr);
-			if (NULL != errstr) {
-				fprintf(stderr, "value is %s, should be between 1 and 9 -- l\n", errstr);
-				return(EX_DATAERR);
-			}
+			rawlflag = optarg;
 			break;
 		case 'n':
 			nflag = 1;
@@ -212,6 +242,18 @@ main(int argc, char *argv[])
 	} else if (1 == pflag) {
 		colourtype = COLOUR_TYPE_INDEXED;
 	}
+
+	/* libdeflate and zlib do not accept the same compression levels */
+	if (NULL != rawlflag) {
+		lflag = strtonum(rawlflag, 1, max, &errstr);
+		if (NULL != errstr) {
+			fprintf(stderr, "value is %s, should be"
+			    "between 1 and %d -- l\n", errstr, max);
+			return(EX_DATAERR);
+		}
+	}
+
+	/* Prepare the output buffer, used mainly for -n */
 	if (NULL == (buf = calloc(PNGBLANK_MAX_SIZE, 1))) {
 		fprintf(stderr, "malloc(%i)\n", PNGBLANK_MAX_SIZE);
 		return(EX_OSERR);
@@ -251,13 +293,33 @@ main(int argc, char *argv[])
 	lgpng_chunk_crc(trns.length, "tRNS", (uint8_t *)&trns.data, &(trns.crc));
 
 	/* IDAT preparation */
-	idat.length = 0;
-	idat.type = CHUNK_TYPE_IDAT;
-	idat.data.data = NULL;
-	if (-1 == create_IDAT_with_zlib(&idat, &ihdr, lflag, sflag)) {
-		return(1);
+	/* Calculate the buffer size using bitdepth and colour type */
+	if (COLOUR_TYPE_TRUECOLOUR == ihdr.data.colourtype) {
+		idat.length = width * width * 3 * ihdr.data.bitdepth / 8 + width;
+	} else if (COLOUR_TYPE_GREYSCALE == ihdr.data.colourtype) {
+		idat.length = (width / (8 / ihdr.data.bitdepth) + \
+		    (width % (8 / ihdr.data.bitdepth) != 0 ? 1 : 0) + 1) * width;
+	} else if (COLOUR_TYPE_INDEXED == ihdr.data.colourtype) {
+		idat.length = width * width * ihdr.data.bitdepth / 8 + width;
+	} else {
+		fprintf(stderr, "Invalid colourtype\n");
+		return(-1);
 	}
-	lgpng_chunk_crc(idat.length, "IDAT", (uint8_t *)&idat.data, &(idat.crc));
+	idat.type = CHUNK_TYPE_IDAT;
+	/* The data is a stream of zero so calloc is perfect */
+	if (NULL == (idat.data.data = calloc(idat.length, 1))) {
+		return(-1);
+	}
+	if (PNG_BLANK_ZLIB == cflag) {
+		if (-1 == create_IDAT_with_zlib(&idat, lflag, sflag)) {
+			return(1);
+		}
+	} else {
+		if (-1 == create_IDAT_with_libdeflate(&idat, lflag)) {
+			return(1);
+		}
+	}
+	lgpng_chunk_crc(idat.length, "IDAT", idat.data.data, &(idat.crc));
 
 	/* IEND preparation */
 	lgpng_chunk_crc(0, "IEND", NULL, &iend_crc);
@@ -282,7 +344,7 @@ main(int argc, char *argv[])
 void
 usage(void)
 {
-	fprintf(stderr, "usage: %s [-gnp] [-b bitdepth] [-l level]"
-			" [-s strategy] width\n", getprogname());
+	fprintf(stderr, "usage: %s [-gnp] [-b bitdepth] [-c library] [-l level]"
+			" [-s strategy] [-c library] width\n", getprogname());
 }
 

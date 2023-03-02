@@ -4,10 +4,9 @@ PROG= pngblank
 SRCS= lgpng.c compats.c ${PROG}.c
 OBJS= ${SRCS:.c=.o}
 
-LDADD+= -lz
-LDFLAGS+=
-CFLAGS+= -std=c99 -Wpointer-sign
-CFLAGS= -Wall -Wextra
+LDADD+= -lz -ldeflate
+LDFLAGS+= -L/usr/local/lib/
+CFLAGS= -Wall -Wextra -I/usr/local/include
 
 .SUFFIXES: .c .o .1 .md
 .PHONY: clean install

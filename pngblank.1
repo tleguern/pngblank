@@ -23,6 +23,7 @@
 .Nm pngblank
 .Op Fl gnp
 .Op Fl b Ar bitdepth
+.Op Fl c Ar library
 .Op Fl l Ar level
 .Op Fl s Ar strategy
 .Ar width
@@ -42,10 +43,13 @@ Do not generate an image, print its size in bytes instead.
 Set the colour type to indexed.
 .It Fl b Ar bitdepth
 Set the bitdepth to a specific value.
+.It Fl c Ar library
+Set the compression library.
+Accept zlib or libdeflate, default is zlib.
 .It Fl l Ar level
-Set the compression level.
+Set the compression level, the default value depends on the compresion library.
 .It Fl s Ar strategy
-Set the compression strategy.
+Set the compression strategy (only valid for zlib).
 .El
 .Sh EXIT STATUS
 .Ex -std pngblank

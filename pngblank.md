@@ -9,6 +9,7 @@ PNGBLANK(1) - General Commands Manual
 **pngblank**
 \[**-gnp**]
 \[**-b**&nbsp;*bitdepth*]
+\[**-c**&nbsp;*library*]
 \[**-l**&nbsp;*level*]
 \[**-s**&nbsp;*strategy*]
 *width*
@@ -38,13 +39,18 @@ The options are as follows:
 
 > Set the bitdepth to a specific value.
 
+**-c** *library*
+
+> Set the compression library.
+> Accept zlib or libdeflate, default is zlib.
+
 **-l** *level*
 
-> Set the compression level.
+> Set the compression level, the default value depends on the compresion library.
 
 **-s** *strategy*
 
-> Set the compression strategy.
+> Set the compression strategy (only valid for zlib).
 
 # EXIT STATUS
 
@@ -66,4 +72,4 @@ The
 utility was written by
 Tristan Le Guern &lt;[tleguern@bouledef.eu](mailto:tleguern@bouledef.eu)&gt;.
 
-OpenBSD 6.7 - April 23, 2020
+OpenBSD 7.2 - April 23, 2020
