@@ -34,7 +34,7 @@
 static void usage(void);
 
 static int
-prepare_IDAT(struct IDAT *idat, struct IHDR *ihdr, int level, int strategy)
+create_IDAT_with_zlib(struct IDAT *idat, struct IHDR *ihdr, int level, int strategy)
 {
 	size_t		 dataz, deflatedz;
 	uint8_t		*data = NULL, *deflated = NULL;
@@ -102,7 +102,7 @@ prepare_IDAT(struct IDAT *idat, struct IHDR *ihdr, int level, int strategy)
 	/* Set deflatedz to the real compressed size */
 	deflatedz = strm.total_out;
 	idat->length = deflatedz;
-	idat->data = deflated;
+	idat->data.data = deflated;
 	return(0);
 exit:
 	free(data);
@@ -128,6 +128,7 @@ main(int argc, char *argv[])
 	struct PLTE	 plte;
 	struct IDAT	 idat;
 	struct tRNS	 trns;
+	uint32_t	 iend_crc;
 
 #if HAVE_PLEDGE
         pledge("stdio", NULL);
@@ -217,44 +218,59 @@ main(int argc, char *argv[])
 	}
 
 	/* IHDR preparation */
-	init_IHDR(&ihdr);
+	ihdr.length = 13;
+	ihdr.type = CHUNK_TYPE_IHDR;
 	ihdr.data.width = htonl(width);
 	ihdr.data.height = htonl(width);
 	ihdr.data.bitdepth = bflag;
 	ihdr.data.colourtype = colourtype;
-	update_crc((struct chunk *)&ihdr);
+	ihdr.data.compression = COMPRESSION_TYPE_DEFLATE;
+	ihdr.data.filter = FILTER_METHOD_ADAPTIVE;
+	ihdr.data.interlace = INTERLACE_METHOD_STANDARD;
+	lgpng_chunk_crc(ihdr.length, "IHDR", (uint8_t *)&ihdr.data, &(ihdr.crc));
 
 	/* PLTE preparation */
 	if (1 == pflag) {
-		init_PLTE(&plte);
 		plte.length = 3; /* Three bytes in a PLTE entry, it's RGB */
-		update_crc((struct chunk *)&plte);
+		plte.type = CHUNK_TYPE_PLTE;
+		plte.data.entries = 1;
+		(void)memset(plte.data.entry, '\0', sizeof(plte.data.entry));
+		lgpng_chunk_crc(plte.length, "PLTE", (uint8_t *)&plte.data, &(plte.crc));
 	}
 
 	/* tRNS preparation */
-	init_tRNS(&trns, colourtype);
-	if (1 == pflag) {
+	if (COLOUR_TYPE_TRUECOLOUR == colourtype) {
+		trns.length = 6;
+	} else if (COLOUR_TYPE_GREYSCALE == colourtype) {
+		trns.length = 2;
+	} else if (COLOUR_TYPE_INDEXED == colourtype) {
 		trns.length = 1;
 	}
-	update_crc((struct chunk *)&trns);
+	trns.type = CHUNK_TYPE_tRNS;
+	(void)memset(&(trns.data), '\0', sizeof(trns.data));
+	lgpng_chunk_crc(trns.length, "tRNS", (uint8_t *)&trns.data, &(trns.crc));
 
 	/* IDAT preparation */
-	init_IDAT(&idat);
-	if (-1 == prepare_IDAT(&idat, &ihdr, lflag, sflag)) {
+	idat.length = 0;
+	idat.type = CHUNK_TYPE_IDAT;
+	idat.data.data = NULL;
+	if (-1 == create_IDAT_with_zlib(&idat, &ihdr, lflag, sflag)) {
 		return(1);
 	}
-	update_crc((struct chunk *)&idat);
+	lgpng_chunk_crc(idat.length, "IDAT", (uint8_t *)&idat.data, &(idat.crc));
 
-	off = 0;
-	off += write_png_sig(buf);
-	off += write_chunk(buf + off, (struct chunk *)&ihdr);
+	/* IEND preparation */
+	lgpng_chunk_crc(0, "IEND", NULL, &iend_crc);
+
+	off = lgpng_data_write_sig(buf);
+	off += lgpng_data_write_chunk(buf + off, ihdr.length, "IHDR", (uint8_t *)&ihdr.data, ihdr.crc);
 	if (1 == pflag) {
-		off += write_chunk(buf + off, (struct chunk *)&plte);
+		off += lgpng_data_write_chunk(buf + off, plte.length, "PLTE", (uint8_t *)&plte.data, plte.crc);
 	}
-	off += write_chunk(buf + off, (struct chunk *)&trns);
-	off += write_chunk(buf + off, (struct chunk *)&idat);
-	off += write_IEND(buf + off);
-	free(idat.data);
+	off += lgpng_data_write_chunk(buf + off, trns.length, "tRNS", (uint8_t *)&trns.data, trns.crc);
+	off += lgpng_data_write_chunk(buf + off, idat.length, "IDAT", (uint8_t *)&idat.data, idat.crc);
+	off += lgpng_data_write_chunk(buf + off, 0, "IEND", NULL, iend_crc);
+	free(idat.data.data);
 	if (0 == nflag) {
 		fwrite(buf, sizeof(uint8_t), off, f);
 	} else {
