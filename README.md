@@ -13,7 +13,8 @@ The pngblank utility generates fully transparent PNG images.
 ### Requires
 
 * C compiler ;
-* libz.
+* libz ;
+* libdeflate.
 
 ### Build
 
