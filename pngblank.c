@@ -277,7 +277,7 @@ main(int argc, char *argv[])
 		plte.type = CHUNK_TYPE_PLTE;
 		plte.data.entries = 1;
 		(void)memset(plte.data.entry, '\0', sizeof(plte.data.entry));
-		lgpng_chunk_crc(plte.length, "PLTE", (uint8_t *)&plte.data, &(plte.crc));
+		lgpng_chunk_crc(plte.length, "PLTE", (uint8_t *)&plte.data.entry, &(plte.crc));
 	}
 
 	/* tRNS preparation */
@@ -327,10 +327,10 @@ main(int argc, char *argv[])
 	off = lgpng_data_write_sig(buf);
 	off += lgpng_data_write_chunk(buf + off, ihdr.length, "IHDR", (uint8_t *)&ihdr.data, ihdr.crc);
 	if (1 == pflag) {
-		off += lgpng_data_write_chunk(buf + off, plte.length, "PLTE", (uint8_t *)&plte.data, plte.crc);
+		off += lgpng_data_write_chunk(buf + off, plte.length, "PLTE", (uint8_t *)&plte.data.entry, plte.crc);
 	}
 	off += lgpng_data_write_chunk(buf + off, trns.length, "tRNS", (uint8_t *)&trns.data, trns.crc);
-	off += lgpng_data_write_chunk(buf + off, idat.length, "IDAT", (uint8_t *)&idat.data, idat.crc);
+	off += lgpng_data_write_chunk(buf + off, idat.length, "IDAT", idat.data.data, idat.crc);
 	off += lgpng_data_write_chunk(buf + off, 0, "IEND", NULL, iend_crc);
 	free(idat.data.data);
 	if (0 == nflag) {
