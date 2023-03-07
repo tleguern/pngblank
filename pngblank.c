@@ -230,7 +230,7 @@ main(int argc, char *argv[])
 		return(EX_USAGE);
 	}
 	if (0 == (width = strtonum(argv[0], 1, 512, NULL))) {
-		fprintf(stderr, "Width should be between 1 and 512\n");
+		fprintf(stderr, "Width should be between 1 and 512, not %s\n", argv[0]);
 		return(EX_DATAERR);
 	}
 	if (1 == gflag && 1 == pflag) {
