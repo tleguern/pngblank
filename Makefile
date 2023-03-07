@@ -6,7 +6,8 @@ OBJS= ${SRCS:.c=.o}
 
 LDADD+= -lz -ldeflate
 LDFLAGS+= -L/usr/local/lib/
-CFLAGS= -Wall -Wextra -I/usr/local/include
+CFLAGS+= -Wall -Wextra -I/usr/local/include
+CFLAGS+= -Wimplicit-fallthrough -Wno-write-strings
 
 .SUFFIXES: .c .o .1 .md
 .PHONY: clean install
